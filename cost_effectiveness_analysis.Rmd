@@ -1,0 +1,171 @@
+---
+title: "Cost-Effectiveness Analysis: Tirzepatide vs Semaglutide"
+author: "Keerthana Choutha"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+This report evaluates the cost-effectiveness of **Tirzepatide** versus **Semaglutide** for treating Type 2 Diabetes Mellitus (T2DM). It includes:
+
+- ICER calculation using QALYs
+- One-way sensitivity analysis
+- Export of results to Excel
+
+# Load Required Libraries
+
+```{r load-packages}
+install.packages(c("dplyr", "writexl"))  # Run only once
+library(dplyr)
+library(writexl)
+```
+
+# Define Base Inputs
+
+```{r base-inputs}
+base_values <- list(
+  mace_tp_t = 0.425,
+  mace_tp_s = 0.444,
+  mort_tp_t = 0.512,
+  mort_tp_s = 0.367,
+  cvd_cost = 14888.32,
+  dm_cost = 13107.60,
+  drug_cost_t = 1079.77,
+  drug_cost_s = 997.59
+)
+
+utility_no_mace <- 0.85
+utility_mace <- 0.70
+utility_dead <- 0
+```
+
+# ICER Function (Based on QALYs)
+
+```{r icer-function}
+calc_icer_qaly <- function(params) {
+  p_mace_t <- params$mace_tp_t
+  p_mort_t <- params$mort_tp_t
+  p_no_mace_t <- max(0, 1 - p_mace_t - p_mort_t)
+
+  cost_t <- (p_mace_t * params$cvd_cost) +
+            (p_no_mace_t * params$dm_cost) +
+            params$drug_cost_t
+
+  qaly_t <- (p_mace_t * utility_mace) +
+            (p_no_mace_t * utility_no_mace) +
+            (p_mort_t * utility_dead)
+
+  p_mace_s <- params$mace_tp_s
+  p_mort_s <- params$mort_tp_s
+  p_no_mace_s <- max(0, 1 - p_mace_s - p_mort_s)
+
+  cost_s <- (p_mace_s * params$cvd_cost) +
+            (p_no_mace_s * params$dm_cost) +
+            params$drug_cost_s
+
+  qaly_s <- (p_mace_s * utility_mace) +
+            (p_no_mace_s * utility_no_mace) +
+            (p_mort_s * utility_dead)
+
+  delta_cost <- cost_s - cost_t
+  delta_qaly <- qaly_s - qaly_t
+  icer <- delta_cost / delta_qaly
+
+  return(list(
+    icer = icer,
+    cost_t = cost_t,
+    cost_s = cost_s,
+    qaly_t = qaly_t,
+    qaly_s = qaly_s
+  ))
+}
+```
+
+# Sensitivity Ranges (±20%)
+
+```{r sensitivity-ranges}
+sensitivity <- data.frame(
+  parameter = names(base_values),
+  base = unlist(base_values)
+) %>%
+  mutate(
+    low = base * 0.8,
+    high = base * 1.2
+  )
+```
+
+# One-Way Sensitivity Analysis
+
+```{r one-way-sensitivity}
+icer_results <- data.frame(Parameter = character(), Low = numeric(), High = numeric())
+
+for (i in 1:nrow(sensitivity)) {
+  param <- sensitivity$parameter[i]
+
+  low_params <- base_values
+  low_params[[param]] <- sensitivity$low[i]
+  low_result <- calc_icer_qaly(low_params)
+
+  high_params <- base_values
+  high_params[[param]] <- sensitivity$high[i]
+  high_result <- calc_icer_qaly(high_params)
+
+  icer_results <- rbind(icer_results, data.frame(
+    Parameter = param,
+    Low = low_result$icer,
+    High = high_result$icer
+  ))
+}
+
+icer_results_clean <- icer_results %>%
+  mutate(
+    Low = round(Low, 2),
+    High = round(High, 2),
+    Range = round(abs(High - Low), 2)
+  )
+```
+
+# Base Case Summary
+
+```{r base-summary}
+base_result <- calc_icer_qaly(base_values)
+
+base_summary <- data.frame(
+  Group = c("Tirzepatide", "Semaglutide"),
+  Cost = round(c(base_result$cost_t, base_result$cost_s), 2),
+  QALY = round(c(base_result$qaly_t, base_result$qaly_s), 4)
+)
+
+base_icer <- data.frame(ICER = round(base_result$icer, 2))
+```
+
+# Export to Excel
+
+```{r export-excel}
+write_xlsx(list(
+  "One-Way Sensitivity" = icer_results_clean,
+  "Base ICER" = base_icer,
+  "Cost and QALY Summary" = base_summary
+), "icer_sensitivity_results.xlsx")
+```
+
+# Results Summary
+
+```{r show-results}
+icer_results_clean
+```
+
+```{r show-base}
+base_summary
+```
+
+```{r show-icer}
+base_icer
